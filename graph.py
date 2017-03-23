@@ -12,6 +12,25 @@ import collections
 import math
 from itertools import groupby
 
+def get_coords_from_nodes(penetration_nodes):
+
+    """get_coords_from_nodes takes a list of disparately found nodes and returns
+    their coordinate pairs(x, y)"""
+
+    dim_coords = []
+
+    try:
+        dim_coords = [dimi[0].children[dimi[1]].unpack_coords for dimi in penetration_nodes]
+    except:
+        for coord_pair in penetration_nodes:
+            try:
+                temp_coords = coord_pair[0].children[coord_pair[1]].unpack_coords
+            except:
+                temp_coords = coord_pair[0].children.unpack_coords
+            dim_coords.append(temp_coords)
+
+    return dim_coords
+
 
 def flatten_coords(coords, imwidth):
 
@@ -117,7 +136,6 @@ class Point:
         Usage:  node.unpackCoords
 
         """
-
         y = self.flat_value/Point.width
         x = abs((y * self.width) - self.flat_value)
         return x, y

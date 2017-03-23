@@ -10,9 +10,53 @@
 # -------------------------------------------------------------------------------
 
 import random
+from PIL import Image, ImageMath
 import math
 from preprocess import get_weighted_mavg
 from stats import *
+
+def calc_end_coord_of_path(start_coords, radius, angle):
+
+    """Get the end coords of a path given a radius and angle
+    think unit circle calculation"""
+
+    k, h = start_coords
+
+    if angle < 0:
+        angle -= 360
+
+    if 0 < angle < 90:  # Q1
+        xraw = (radius * math.cos(math.radians(angle))) + k
+        yraw = h - (radius * math.sin(math.radians(angle)))
+    elif 90 < angle < 180:  # QII
+        xraw = radius * math.cos(math.radians(angle)) + k
+        yraw = h - (radius * math.sin(math.radians(angle)))
+    elif 180 < angle < 270:  # QIII
+        xraw = radius * math.cos(math.radians(angle)) + k
+        yraw = h - (radius * math.sin(math.radians(angle)))
+    elif 270 < angle < 360:          # QIV
+        xraw = k + (radius * math.cos(math.radians(angle)))
+        yraw = h - (radius * math.sin(math.radians(angle)))
+    elif angle == 90:
+        xraw = k
+        yraw = h - radius
+    elif angle == 180:
+        xraw = k - radius
+        yraw = h
+    elif angle == 270:  # k is x, h is y
+        xraw = k
+        yraw = h + radius
+    elif angle == 0 or angle == 360:
+        xraw = k + radius
+        yraw = h
+    else:
+        xraw = k
+        yraw = h
+    x = int(xraw)
+    y = int(yraw)
+
+    end_coords = x, y
+    return end_coords
 
 
 def calc_euclid_dist(a, b, round=0, signed=0):
@@ -192,7 +236,7 @@ def get_pixel_path_from_angle(center_coords, max_radius, angle, maxy, truncate=0
     else:
         start_rad = 0  # zero to max radius get the full path between
         end_rad = int(max_radius)
-
+    
     for radius in range(start_rad, end_rad):
 
         if 0 < angle < 90: #Q1
@@ -230,62 +274,34 @@ def get_pixel_path_from_angle(center_coords, max_radius, angle, maxy, truncate=0
             path_coords.append(coords)
         else:
             pass
-
+    
     return path_coords
+    
 
+def get_polar_angle(point1, point2, suppress_quad=0):
 
-def get_polar_angle(point_a, point_b, supress_quad=0):
+    x, y = point1[0], point1[1]
+    xd, yd = point2[0], point2[1]
 
-    """Get angle between two points. Split the points up into x, y
-    and xd, yd then get the quadrant of the delta coordinates so we can adjust
-    the equation to get the polar angle."""
-
-    quad = 0  # quadrant
-    x, y = point_a[0], point_a[1]  # this is done specifically if point a has more info
-    xd, yd = point_b[0], point_b[1]
     xdelta = x - xd
-    ydelta = y - yd
-
-    # get quadrant based on position
-    if xdelta < 0 and ydelta <= 0:
-        quad = 2
-    elif xdelta < 0 and ydelta > 0:
-        quad = 3
-    elif xdelta > 0 and ydelta > 0:
-        quad = 4
+    ydelta = (y - yd) * -1 # convert the delta for rotated x/y axis of image
+    
+    angle = math.degrees(math.atan2(ydelta, xdelta))
+    angle += 180
+   
+    if suppress_quad == 1:
+        return int(angle)
     else:
-        if xdelta == 0 and ydelta > 0:
-            quad = 1  # 90 degrees
-        elif xdelta == 0 and ydelta < 0:
-            quad = 4  # 270
-        elif xdelta > 0 and ydelta == 0:
-            quad = 2  # 180
-        else:
+	if xdelta > 0 and ydelta > 0:
             quad = 3
-
-    if xdelta != 0:  # not vertical
-        angle = int(math.degrees(math.atan2(ydelta, xdelta)))
-        if quad == 4:
-            angle = 360 - angle
-        elif quad == 3:
-            angle = 360 - angle
-        elif quad == 2:
-            if ydelta == 0:
-                pass
-            else:
-                angle *= -1
-        else:
-            angle *= -1
-    else:
-        if y < yd:
-            angle = 90
-        else:
-            angle = 270
-    if supress_quad == 0:
-        return angle, quad
-    else:
-        return angle
-
+        elif xdelta < 0 and ydelta > 0:
+            quad = 4
+        elif xdelta > 0 and ydelta < 0:
+            quad = 2
+        elif xdelta < 0 and ydelta < 0:
+            quad = 1
+        return int(angle), quad
+        
 
 def get_median_line_width(pix, jump_slice, pixel_test, width, height):
 
@@ -298,15 +314,186 @@ def get_median_line_width(pix, jump_slice, pixel_test, width, height):
 
     # get the distance and direction of each path
     diag_dist = int(math.sqrt(width**2 + height**2) * .90)
+    vertical_start = int(width/float(2)), 10  # x=width/2, y=0
+    horizontal_start = 10, int(height/float(2))  # x=0, y=width/2
+    diagonal_angle = get_polar_angle(origin, (width, height), 1)
+    
+    # create the list of pixels in each row/column/path
+    vertical_path = get_pixel_path_from_angle(vertical_start, height - 10, 270, width)
+    horizontal_path = get_pixel_path_from_angle(horizontal_start, width - 10, 0, height)
+    diag_path = get_pixel_path_from_angle(origin, diag_dist, diagonal_angle, 1, height)
+    # print vertical_path[0], vertical_path[-1], 'vertical path start'
+    # print horizontal_path[0], horizontal_path[-1], 'horizontal path start'
+    
+    avg, seed_list = seed_mavg(diag_path, pix, 7)
+    moving_avg = moving_average_container(seed_list)
+    avg = moving_avg.get_moving_average(avg)
+
+    # read the pixels in the vertical path and compare them to threshold value
+    first_coord = vertical_path[0]
+    x, y = first_coord
+   
+    last_pixval = pix[x, y]
+   
+    trigger = 0
+    temp_line = []
+    save_lines = []
+    # read each pixel value in a path look for runs of black pixels
+    for coords in vertical_path[1:]:
+        x, y = coords
+        pixval = pix[x, y]  # pixel value
+        thresh = pixval - last_pixval  # threshold
+
+        if trigger == 0:  # if no black pixel set the new threshold value
+            # if the avg pixel is less than a pre calculated black level
+            if avg < pixel_test[0]:
+                threshold = jump_slice[0] - 1  # set the threshold value
+            # elif pixel_test[0] <= avg <= pixel_test[-1]:
+            elif pixel_test[0] <= avg <= pixel_test[1]:
+                threshold = jump_slice[1]  # get the middle threshold value
+            else:
+                threshold = jump_slice[-1] - 1  # get the dark threshold level
+
+        if thresh <= threshold and trigger == 0:  # if the current pixval is less than threshold and no trigger
+            trigger = 1  # then set trigger to start saving black pixels
+
+        if trigger == 1: # actually save the black coords
+            temp_line.append(coords)
+
+        if trigger == 0 and thresh >= threshold + 8:
+            avg = moving_avg.get_moving_average(pixval)
+
+        if pixval >= avg - 10 and trigger == 1 or thresh >= 12 and trigger == 1:
+            # if we hit a high one and trigger is one then reset
+            trigger = 0
+            save_lines.append(temp_line)
+            temp_line = []
+        last_pixval = pixval
+
+    avg, seed_list = seed_mavg(diag_path, pix, 7)
+    moving_avg = moving_average_container(seed_list)
+    avg = moving_avg.get_moving_average(avg)
+
+    # read the pixels in the vertical path and compare them to threshold value
+    first_coord = diag_path[0]
+    x, y = first_coord
+    last_pixval = pix[x, y]
+
+    trigger = 0
+    temp_line = []
+
+    for coords in diag_path[1:]:
+        x, y = coords
+        pixval = pix[x, y]
+        thresh = pixval - last_pixval
+
+        if trigger == 0:
+
+            if avg < pixel_test[0]:
+                threshold = jump_slice[0] - 3
+            elif pixel_test[0] <= avg <= pixel_test[-1]:
+                threshold = jump_slice[1]
+            else:
+                threshold = jump_slice[-1] - 1
+
+        if thresh <= threshold and trigger == 0:  # start saving
+            trigger = 1
+
+        if trigger == 1:  # actually save the black coords
+            temp_line.append(coords)
+
+        if trigger == 0 and thresh >= threshold + 8:
+            avg = moving_avg.get_moving_average(pixval)
+
+        if pixval >= avg - 10 and trigger == 1 or thresh >= 12 and trigger == 1:
+            # if we hit a high one and trigger is one then reset
+            trigger = 0
+            save_lines.append(temp_line)
+            temp_line = []
+        last_pixval = pixval
+
+    avg, seed_list = seed_mavg(horizontal_path, pix, 7)
+    moving_avg = moving_average_container(seed_list)
+    avg = moving_avg.get_moving_average(avg)
+
+    # read the pixels in the vertical path and compare them to threshold value
+    first_coord = horizontal_path[0]
+    x, y = first_coord
+    last_pixval = pix[x, y]
+
+    trigger = 0
+    temp_line = []
+
+    for coords in horizontal_path[1:]:
+        x, y = coords
+        pixval = pix[x, y]
+        thresh = pixval - last_pixval
+	
+        if trigger == 0:
+
+            if avg < pixel_test[0]:
+                threshold = jump_slice[0] - 3
+            elif pixel_test[0] <= avg <= pixel_test[-1]:
+                threshold = jump_slice[1]
+            else:
+                threshold = jump_slice[-1] - 1
+
+        if thresh <= threshold and trigger == 0:  # start saving
+            trigger = 1
+
+        if trigger == 1:  # actually save the black coords
+            temp_line.append(coords)
+	
+        if trigger == 0 and thresh >= threshold + 8:
+            avg = moving_avg.get_moving_average(pixval)
+
+        if pixval >= avg - 10 and trigger == 1 or thresh >= 12 and trigger == 1:
+            # if we hit a high one and trigger is one then reset
+            trigger = 0
+            save_lines.append(temp_line)
+            temp_line = []
+        last_pixval = pixval
+
+    save_line_lens = []
+   
+    for line in save_lines:
+
+        line_len = len(line)
+	
+        # if 5 < line_len < 30:
+        if 4 < line_len < 30:
+            save_line_lens.append(line_len)
+
+    line_sum = sum(save_line_lens)
+    num_lines = len(save_line_lens)
+
+    line_avg = int(line_sum/float(num_lines))  # or should we get median?????
+
+    median_line_index = int(num_lines/float(2))
+    median_line = save_line_lens[median_line_index]
+
+    return line_avg
+
+
+def get_median_line_width_thumbnail(pix, jump_slice, pixel_test, width, height):
+
+    """reads a single horizontal row, a single vertical column and a digaonal
+    path across an image and searches for line crossings or black pixels that
+    appear in each path. Measure the width of each of those lines and return
+    the width that is in the center of the list"""
+
+    origin = 0, 0
+
+    # get the distance and direction of each path
+    diag_dist = int(math.sqrt(width**2 + height**2) * .90)
     vertical_start = int(width/float(2)), 0  # x=width/2, y=0
     horizontal_start = 0, int(height/float(2))  # x=0, y=width/2
-    diagonal_angle = get_polar_angle((width, height), origin, 1)
+    diagonal_angle = get_polar_angle(origin, (width, height), 1)
 
     # create the list of pixels in each row/column/path
     vertical_path = get_pixel_path_from_angle(vertical_start, height, 270, width)
     horizontal_path = get_pixel_path_from_angle(horizontal_start, width, 0, height)
-    diag_path = get_pixel_path_from_angle(origin, diag_dist,
-                                          diagonal_angle, 1, height)
+    diag_path = get_pixel_path_from_angle(origin, diag_dist, diagonal_angle, 1, height)
 
     avg, seed_list = seed_mavg(diag_path, pix, 7)
     moving_avg = moving_average_container(seed_list)
@@ -459,65 +646,158 @@ def get_median_line_width(pix, jump_slice, pixel_test, width, height):
 
 def read_line_down(pix, IMWIDTH, IMHEIGHT):
 
+    """
+    This is the read line down used in detect lined paper
+    """
+
+    # initialize the pixelvalue  moving average for line detection
     x = 80
     avg_init = []
+    # print 'inseid read line down'
     for yi in range(6):
+	print yi, 'this is y i'
         mav_pix = pix[x, yi]
-        avg_init.append(mav_pix[0])
+	print 'post pix', mav_pix
+        avg_init.append(mav_pix[0])  # check avg red color
+	print 'post append red'
     avg_start = sum(avg_init)/float(6)
-
-    x = 80
+    print 'avg start', avg_start
     list_of_blue_coords = []
     list_of_blue_colors = []
-    for yval in range(IMHEIGHT - 4):
+    print 'pre yval down'
+    # a really rough moving average check for line checking
+    for yval in range(IMHEIGHT - 10):
         pixval = pix[x, yval]
 
-        if avg_start - 20 <= pixval[0] <= avg_start + 20:
-            del avg_init[0]
-            avg_init.append(pixval[0])
-            avg_start = sum(avg_init)/float(6)
-        else:
+	# get the first pixel value in the color tuple 'pixval' and see if its in the average range
+        red_val, green_val, blue_val = pixval
+        if red_val < (blue_val * .90) and green_val < blue_val:  # blue line
+
+        # if avg_start - 20 <= pixval[0] <= avg_start + 20:  # we are looking at red color RGB # 
+            # avg_init.pop(0)  # could use deque for better performance
+            # avg_init.append(pixval[0])
+            # avg_start = sum(avg_init)/float(6)
+            # else:  # if the first pixel is not within 20 of blue then save it. this give us a list of adjacent pixels
+	    # theoretically this is the space between blue lines of the lined paper
             pair = x, yval
-            list_of_blue_coords.append(pair)
-            list_of_blue_colors.append(pixval)
-
-    distances = [calc_euclid_dist(coord, list_of_blue_coords[ind -1]) for ind, coord in enumerate(list_of_blue_coords)][1:]
-    gaps = [dinga for dinga in distances if dinga > 10]
-    if gaps > 8:  # have to have more than 8 lines
+            list_of_blue_coords.append(pair)  # blue coords
+            list_of_blue_colors.append(pixval)  # blue colors
+    
+    # print len(list_of_blue_colors), 'colors'
+    dist_between = [(calc_euclid_dist(coord, list_of_blue_coords[ind -1]), coord) for ind, coord in enumerate(list_of_blue_coords)][1:]
+    large_gaps_and_coords = [dinga for dinga in dist_between if dinga[0] > 10]
+    
+    gaps = [dinga[0] for dinga in large_gaps_and_coords]
+    # look for rhythm in the gaps
+    # print gaps, 'this is the number of gaps'
+    # print [abs(dag - gaps[index-1]) for index, dag in enumerate(gaps)][1:]
+    # print len(gaps), 'gaps'
+    if len(gaps) > 8:  # have to have more than 8 lines
         variance = calc_variance(gaps, 1)
-        if variance < 10:
-            return True, list_of_blue_colors
+	deviation_in_gaps = get_median_absolute_deviation(gaps)
+	# print deviation_in_gaps, 'deviation'	
+        if deviation_in_gaps <= 23:
+            return True, list_of_blue_colors, large_gaps_and_coords
         else:
-            return False, []
-    else:
-        return False, []
+ 	    # too lumpy of a line distribution to be regular lines
+            return False
+    else:  # no lines found
+        return False
 
 
-def remove_lines(lined_image, line_colors, IMWIDTH, IMHEIGHT):
+def remove_lines_old(lined_image, IMWIDTH, IMHEIGHT):
 
     """Remove the lines from an drawing that was drawn on lined paper"""
+    # do we want to make a running average??
 
-    red_range = list(set([lined[0] for lined in line_colors]))
-    green_range = list(set([lined[1] for lined in line_colors]))
-    blue_range = list(set([lined[2] for lined in line_colors]))
-    sorted_red = sorted(red_range, reverse=True)
-    sorted_green = sorted(green_range, reverse=True)
-    sorted_blue = sorted(blue_range, reverse=True)
+    for x in range(10, IMWIDTH - 10):
+        for y in range(10, IMHEIGHT - 11):
+		   
+	    local_pixval = lined_image[x, y]
+	    red_val, green_val, blue_val = local_pixval
+	    # pixel intensity?
+	    if x == 2000:
+		# print x, y, local_pixval
+		pass
+	    
+	    if red_val <= 55 and green_val <= blue_val:
+		
+		grey_color = red_val, green_val, red_val
+		for item in range(6):
+		    lined_image[x, y - 2 + item] = grey_color
+		    # pass
+		    # span_val = lined_image[x, y-span_adj+span] 
+		    # lined_image[x, y-6+span] = span_val
+	    
+		     
+    print 'did this return'
+    return lined_image
 
-    for ycoord in range(IMHEIGHT):
-        for xcoord in range(IMWIDTH):
 
-            local_pixval = lined_image[xcoord, ycoord]
-            # lower levels of red means a bluer line
-            if (sorted_red[-1] - 8 <= local_pixval[0] <= sorted_red[0] + 8 and
-               sorted_green[-1] - 3 <= local_pixval[1] <= sorted_green[0] and
-               sorted_blue[-1] - 3 <= local_pixval[2] <= sorted_blue[0]):
+def diff1(source, color):
+    """When source is bigger than color"""
+    return (source - color) / (255.0 - color)
 
-                red = random.randint(158, 195)
-                green = random.randint(158, 195)
-                blue = random.randint(158, 195)
-                lined_image[xcoord, ycoord] = (red, green, blue)
+def diff2(source, color):
+    """When color is bigger than source"""
+    return (color - source) / color
 
+
+def color_to_alpha(image, color=None):
+    # convert to rgb color with alpha channel
+    print 'inside color to alpha'
+    image = image.convert('RGBA')
+    print 'convert succeded'
+    width, height = image.size  # size
+    print width, height, 'inside'
+    color = map(float, color)  # map the float color
+    print color, 'color'
+    img_bands = [band.convert("F") for band in image.split()]
+    print img_bands, 'split the image into bands'
+    # Find the maximum difference rate between source and color. I had to use two
+    # difference functions because ImageMath.eval only evaluates the expression
+    # once.
+    alpha = ImageMath.eval(
+        "float(max(max(max(diff1(red_band, cred_band), diff2(green_band, cgreen_band)), diff1(blue_band, cblue_band)), max(max(diff2(red_band, cred_band),diff2(green_band, cgreen_band)),diff2(blue_band, cblue_band))))",
+        diff1=diff1,
+        diff2=diff2,
+        red_band = img_bands[0], 
+        green_band = img_bands[1],
+        blue_band = img_bands[2],
+        cred_band = color[0],
+        cgreen_band = color[1],
+        cblue_band = color[2]
+    )
+    print 'alpha went'
+    # Calculate the new image colors after the removal of the selected color
+    new_bands = [
+        ImageMath.eval(
+            "convert((image - color) / alpha + color, 'L')",
+            image = img_bands[i],
+            color = color[i],
+            alpha = alpha
+        )
+        for i in xrange(3)
+    ]
+    print 'new bands'
+    # Add the new alpha band
+    new_bands.append(ImageMath.eval(
+        "convert(alpha_band * alpha, 'L')",
+        alpha = alpha,
+        alpha_band = img_bands[3]
+    ))
+    print 'new bands appended'
+
+    return Image.merge('RGBA', new_bands)
+
+def remove_lines(image, color_mask):
+    
+    print 'inside remove lines'
+    image = color_to_alpha(image, (220, 100, 140, 255))
+    print 'returned image'
+    background = Image.new('RGB', image.size, (255, 255, 255))
+    background.paste(image.convert('RGB'), mask=image)
+    return image
 
 def calc_avg_coord(coord_list):
 

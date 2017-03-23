@@ -81,7 +81,7 @@ if __name__ == '__main__':
     im.load()
     im.save("/home/jpegsnatcher/processed/your_file.jpeg")
 
-
+    # write jpeg image from raw data in python without pil
     # def write_png(buf, width, height):
     #     """ buf: must be bytes or a bytearray in Python3.x,
     #         a regular string in Python2.x.

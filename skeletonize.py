@@ -1,8 +1,8 @@
 #-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
+# Name:        skeletonize
+# Purpose:     Read a picture of hand sketch and capture all the black pixels
 #
-# Author:      GeoffB
+# Author:      Geoff Brown
 #
 # Created:     31/12/2014
 # Copyright:   (c) GeoffB 2014
@@ -121,17 +121,17 @@ def skeletonize_image(pixobj, median_line_width, nwbound, sebound, imheight,
     read_angle = 282  # this has large effect on digitization was 275, 282. can we tune this to conditions?
     angled_line_width = get_angled_line_width(median_line_width, read_angle)
     
-    diag_range = calculate_diagonal_width(nwbound, sebound, read_angle, imwidth)
+    diag_range = calculate_diagonal_width(nwbound, sebound, read_angle, imwidth, imheight)
 
     skeleton_pixels = []
    
     min_x_of_drawing, max_x_of_drawing, diagonal_length = diag_range
-   
+    # print min_x_of_drawing, max_x_of_drawing, imwidth, 'all'
     for drawn_x in range(min_x_of_drawing, max_x_of_drawing):  # was step of 2
 	
         if min_x_of_drawing == drawn_x:  # of the start range is the first one we set the diagonal path
             start_coords = min_x_of_drawing, 4   # you southwest corner of drawing
-	    
+	 
             diagonal_path = get_pixel_path_from_angle(start_coords, diagonal_length, read_angle, imheight)
 	    
         else:
@@ -346,14 +346,14 @@ def get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
     # the diagonal row is check for boundary inclusion
     
     generated_diagonal_row = [(x, y) for x, y in generated_diagonal_row
-                              if 14  < x < IMWIDTH - 1 and 5  < y < IMHEIGHT - 1]
-    
+                              if 9  < x < IMWIDTH - 9 and 9  < y < IMHEIGHT - 9]
+     
     if generated_diagonal_row:
 		
         coord = generated_diagonal_row[0]
         x, y = coord
         # get overarching integral threshold called local_avg
-        integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 10)
+        integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 16)
 	# integral_avg = avg_pixval
         black_pixels = []
         diag_length = len(generated_diagonal_row)  # this changes at the beginning and ending of the drawing
@@ -369,6 +369,7 @@ def get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
 
             coord = generated_diagonal_row[index]
             x, y = coord
+	   
             pixval = pix[x, y]
             # threshold_level = local_avg + threshold_adjustment
             thresh = pixval - integral_avg  # difference between local avg and pixval, this must be
@@ -386,19 +387,19 @@ def get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
                 coord_tuple = coord, local_threshold
                 temp_line.append(coord_tuple)
 	    # print pixval, integral_avg, thresh, threshold_adjustment, 'pixval, int_avg, thresh, threshold_ajdustment'
+	    # print thresh, trigger, integral_avg, pixval, 'dif between pixval and integral, trigger, int_avg, pxval'
             if pixval >= integral_avg - 5 and trigger == 1 or thresh >= 5 and trigger == 1:
                 trigger = 0         # was 10 above
                 black_pixels.append(temp_line)
                 temp_line = []
 
-            if index % 20 == 0 or y < 20 or y > IMHEIGHT - 10:
+            if index % 20 == 0 or y < 20 or y > IMHEIGHT - 7:
 		 # recalibrate the threshold once every 40 pixels. Effects threshold drastically
                 if coord[0] > IMWIDTH or coord[1] > IMHEIGHT:
-                    integral_avg = get_local_avg_from_integral(integral_image, coord, 1, 10)
+                    integral_avg = get_local_avg_from_integral(integral_image, coord, 1, 16)
                 else:
-                    integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 10)
-	        if integral_avg < (pixval_key/float(2.4)):  # gross error
-			integral_avg = pixval_key 	
+                    integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 16)
+	         	
     else:
         black_pixels = []
 
@@ -451,6 +452,7 @@ def get_slope_from_angle(angle):
         slope = math.sin(math.radians(angle))
     elif 90 < angle < 180:
         slope = math.sin(math.radians(angle))  # we know opposite
+
     elif 180 < angle < 270:
         slope = -math.sin(math.radians(angle))
     elif 270 < angle < 360:
@@ -463,7 +465,7 @@ def get_slope_from_angle(angle):
     return slope
 
 
-def calculate_diagonal_width(upper_left, lower_right, angle, imheight):
+def calculate_diagonal_width(upper_left, lower_right, angle, imwidth, imheight):
 
     """When we create the diagaonal search paths to look for black pixels the
     path will likely have to start well off the image boundaries in order to
@@ -482,7 +484,7 @@ def calculate_diagonal_width(upper_left, lower_right, angle, imheight):
     reverse_angle = angle - 180   # Look in the opposite direction currently 102
     if reverse_angle < 0:
         reverse_angle += 360
-
+    
     # if we lean from left to right or when reversed right to left
     if angle < 270:
         start_range = xstart # we have the x start need x end
@@ -499,18 +501,20 @@ def calculate_diagonal_width(upper_left, lower_right, angle, imheight):
         lower_left = xstart, yend  # first x contact and last y contact
 	
         opposite_length = abs(ystart - yend) # is the opposite in sohcahtao)
-        
-        slope = get_slope_from_angle(reverse_angle)
-        hypot = int(imheight/float(slope))  # hypotenuse
+        # invert the slope to get hypot    
+        slope = 1/get_slope_from_angle(angle)
+        hypot = int(imheight/float(slope)) + ystart  # hypotenuse
 	# get the coordinate at the end of the hypotenuse
         new_coords = get_coords_from_angle(lower_left, hypot, reverse_angle)
-	start_range = new_coords[0]
-        
+	start_range = new_coords[0]  # x value thats far to the left
+    	    
 	if start_range < 0:
-	    end_range = xend + (start_range * -1)  # add the total offset from the front to the end
+	    end_gap_adjustment = abs(imwidth + (start_range * -1))
+	    end_range = xend + end_gap_adjustment  # add the total offset from the front to the end
 	else:
-	    end_range = xend + start_range + 10
-
+	    end_gap_adjustment = abs(imwidth + start_range)
+	    end_range = xend + end_gap_adjustment
+   
     return start_range, end_range, hypot 
 
 

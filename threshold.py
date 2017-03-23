@@ -139,7 +139,7 @@ def calculate_threshold_range(median_neg, std_dev, avg_pixval, std_pix_dev):
     return slice_range, slice_range_pixval
 
 
-def calibrate_black_threshold(pix, width, height):
+def calibrate_black_threshold_thumb(pix, width, height):
 
     """reads a single horizontal row, a single vertical column and a digaonal
     path across an image and searches for line crossings or black pixels that
@@ -153,8 +153,8 @@ def calibrate_black_threshold(pix, width, height):
     diag_dist = int(math.sqrt(width**2 + height**2) * .90)
     vertical_start = int(width/float(2)), 0  # x=width/2, y=0
     horizontal_start = 0, int(height/float(2))  # x=0, y=width/2
-    diagonal_angle = get_polar_angle((width, height), origin, 1)
-
+    diagonal_angle = get_polar_angle(origin, (width, height), 1)
+   
     # create the list of pixels in each row/column/path
     vertical_path = get_pixel_path_from_angle(vertical_start, height, 270, height)
     horizontal_path = get_pixel_path_from_angle(horizontal_start, width, 0, height)

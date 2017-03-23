@@ -1,4 +1,4 @@
-#-------------------------------------------------------------------------------
+#----------------------------------------------------------------------------
 # Name:        module1
 # Purpose:
 #
@@ -9,9 +9,8 @@
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 
-
 from attribs.attribs import *
-from threshold import get_local_avg_from_integral, calc_local_thresh
+from Threshold.threshold import get_local_avg_from_integral, calc_local_thresh
 from itertools import groupby
 
 
@@ -82,21 +81,72 @@ def skeletonize_segment(segment, median_line_width, angled_line_width):
     #       center_index = segment_length/2
     #       skeleton = segment[center_index - 2:center_index]
 
-    if segment_length > 6:  # angled_line_width + 6:
+    if segment_length >= 5:  # angled_line_width + 6:
 
         #        skeleton = segment[3::3]
         #        if len(segment) > angled_line_width + 10:
-        skeleton = segment[0:-3]  # this was [0:-3]
+        skeleton = segment[:-2]  # this was [0:-3]
 
     else:
         if segment_length >= 3:
-            skeleton = segment[0:2]
+            skeleton = segment[:3]
 
     return skeleton
 
 
-def skeletonize_image(pixobj, median_line_width, nwbound, sebound, imheight,
-                      pixval_dev, pixval_key, x_n, y_n, imwidth, integral_image, threshold_map):
+def skeletonize_image(pil_obj, median_line_width, nw_bound, se_bound, imheight,
+                      pixval_dev, imwidth, integral_image, threshold_map):
+
+    """
+
+    Args:
+        pil_obj:
+        median_line_width:
+        nwbound:
+        sebound:
+        imheight:
+        pixval_dev:
+        pixval_key:
+        imwidth:
+        integral_image:
+        threshold_map:
+
+    Returns:
+
+    """
+    # which skeletonize are you on lined or unlined?? Unlined here
+    read_angle = 282  # this has large effect on digitization was 275, 282. can we tune this to conditions?
+    angled_line_width = get_angled_line_width(median_line_width, read_angle)
+    diag_range = calculate_diagonal_width(nw_bound, se_bound, read_angle, imwidth, imheight)
+    min_x_of_drawing, max_x_of_drawing, diagonal_length = diag_range
+    # print min_x_of_drawing, max_x_of_drawing, diagonal_length, 'min x, max and diagonal length'
+    skeleton_pixels = []
+    for drawn_x in range(min_x_of_drawing, max_x_of_drawing): # [::2]:  # was step of 2 # this x is larger
+
+        if diag_range[0] == drawn_x:  # of tje start start range is the first one we set the diagonal path
+            start_coords = min_x_of_drawing, nw_bound[1]  # you start at north west corner
+            diagonal_path = get_pixel_path_from_angle(start_coords, diagonal_length, read_angle, imheight)
+
+        else:
+            diagonal_path = [(x + 1, y) for x, y in diagonal_path]  # shift the path right by two each time (x+2, y) #####
+
+        if diagonal_path:  # check to make sure the entire diagonal line is not off the page
+	    skeleton_lines = get_black_pixels_in_diag_row(diagonal_path, pil_obj, pixval_dev,            
+                                    nw_bound, se_bound, imwidth, imheight, integral_image, threshold_map)
+
+            # skeleton_lines = get_line_segments_in_path(diagonal_path, pixobj, pixval_dev,
+            #                                            nw_bound, se_bound, imwidth, imheight, integral_image, threshold_map)
+	   
+            if skeleton_lines:
+                for line in skeleton_lines:
+                    eroded_line = skeletonize_segment(line, median_line_width, angled_line_width)
+                    for coord_tup in eroded_line:  # flatten the list
+                        skeleton_pixels.append(coord_tup)
+ 
+    return skeleton_pixels
+
+
+def skeletonize_lined_image(pixobj, integral_image, imwidth, imheight, nw_bound, se_bound, median_line_width=6):
 
     """
 
@@ -117,40 +167,39 @@ def skeletonize_image(pixobj, median_line_width, nwbound, sebound, imheight,
     Returns:
 
     """
-    
-    read_angle = 282  # this has large effect on digitization was 275, 282. can we tune this to conditions?
-    angled_line_width = get_angled_line_width(median_line_width, read_angle)
-    
-    diag_range = calculate_diagonal_width(nwbound, sebound, read_angle, imwidth)
 
-    skeleton_pixels = []
-   
+    x_w, y_n = nw_bound
+    read_angle = 282  # this has large effect on digitization was 275, 282. can we tune this to conditions?
+    print read_angle
+    angled_line_width = get_angled_line_width(median_line_width, read_angle)
+    diag_range = calculate_diagonal_width(nw_bound, se_bound, read_angle, imwidth, imheight)
     min_x_of_drawing, max_x_of_drawing, diagonal_length = diag_range
-   
-    for drawn_x in range(min_x_of_drawing, max_x_of_drawing):  # was step of 2
-	
-        if min_x_of_drawing == drawn_x:  # of the start range is the first one we set the diagonal path
-            start_coords = min_x_of_drawing, 4   # you southwest corner of drawing
-	    
+    print min_x_of_drawing, max_x_of_drawing, diagonal_length, 'min x, max and diagonal length'
+    skeleton_pixels = []
+    
+    for drawn_x in range(min_x_of_drawing, max_x_of_drawing): # [::2]:  # was step of 2
+
+        if diag_range[0] == drawn_x:  # of tje start start range is the first one we set the diagonal path
+            start_coords = min_x_of_drawing, 30  # you start at north west corner
             diagonal_path = get_pixel_path_from_angle(start_coords, diagonal_length, read_angle, imheight)
-	    
+       
         else:
-            diagonal_path = [(x+1, y) for x, y in diagonal_path]  # shift the path right by two for full size x+2
+            diagonal_path = [(x + 1, y) for x, y in diagonal_path]  # shift the path right by two each time (x+2, y) #####
 
         if diagonal_path:  # check to make sure the entire diagonal line is not off the page
+	    print 'we got a diag path and starting get whites'
+          
+    	    skeleton_lines = get_white_pixels_in_lined_diag_row(diagonal_path, pixobj, x_w, y_n, imwidth, imheight, integral_image)
 
-            skeleton_lines = get_line_segments_in_path(diagonal_path, pixobj, pixval_dev, pixval_key,
-                                                       x_n, y_n, imwidth, imheight, integral_image, threshold_map)
-	    
             if skeleton_lines:
-
+		print len(skeleton_lines), 'skeleton lines'
                 for line in skeleton_lines:
-                    # eroded_line = skeletonize_segment(line, median_line_width, angled_line_width)
-                    # for coord_tup in eroded_line:  # flatten the list
-		    for coord_tup in line:
+                    eroded_line = skeletonize_segment(line, median_line_width, angled_line_width)
+                    for coord_tup in eroded_line:  # flatten the list
                         skeleton_pixels.append(coord_tup)
-
+ 
     return skeleton_pixels
+
 
 
 def generate_generic_arc_path(center, radius, arc_size):
@@ -167,7 +216,6 @@ def generate_generic_arc_path(center, radius, arc_size):
     h, k = center
 
     for angle in range(arc_size):
-
         if 0 < angle < 90:  # Q1
             xraw = (radius * math.cos(math.radians(angle))) + k
             yraw = h - (radius * math.sin(math.radians(angle)))
@@ -198,6 +246,7 @@ def generate_generic_arc_path(center, radius, arc_size):
         x = int(xraw)
         y = int(yraw)
         coords = x, y
+	
         if coords not in path_coords:
             path_coords.append(coords)
         else:
@@ -212,14 +261,14 @@ def read_skeleton_points(skeleton_coords, pix, imwidth, imheight, threshold_map,
     of black pixels for clumping into line penetrations"""
 
     skeleton_black_pixel_list = []
-
+    
     for index, coord_pair in enumerate(skeleton_coords):
         coords, local_avg = coord_pair
         x, y = coords
         # calculate the local x, y path around the center coord
+
         local_circle = shift_generic_path_to_local_coords(coord_pair, circle_pattern, imwidth, imheight)
         circle_scan = read_local_arc_path(local_circle, coords, pix, imwidth, imheight)
-
         polar_angles_to_black_pixels = get_black_angles(circle_scan, local_avg)
 
         # the only way this can be slower is if there are way more black pixels surrounding the center point
@@ -229,7 +278,7 @@ def read_skeleton_points(skeleton_coords, pix, imwidth, imheight, threshold_map,
 
             if arc_angle:
 
-                pack_up = (x, y), direction, arc_angle  # direction is polar angle
+                pack_up = (x, y), direction, arc_angle  # direction is polar angle arc angle is the links
                 skeleton_black_pixel_list.append(pack_up)
 
     return skeleton_black_pixel_list
@@ -335,28 +384,29 @@ def get_black_angles(pixvals, threshold):
     return black_angles
 
 
-def get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
-                     x_nw, y_nw, IMWIDTH, IMHEIGHT, integral_image, threshold_map):
+def get_black_pixels_in_diag_row(generated_diagonal_row, pix, pixval_dev,
+                     nw_bound, se_bound, IMWIDTH, IMHEIGHT, integral_image, threshold_map):
 
     """Read a row of pixels from an image test each pixel value for blackness
     if its black the start counting and if we have several sequential blacks
     then we can say we found blacks"""
 
     # generated_diagonal_rows is a list of coordinates that runs diagonally  across the page
-    # the diagonal row is check for boundary inclusion
-    
+    # the diagonal row is check for boundary inclusion we need to reach off the page to generate
+    # read lines that will capture all the black pixels on the canvas
     generated_diagonal_row = [(x, y) for x, y in generated_diagonal_row
-                              if 14  < x < IMWIDTH - 1 and 5  < y < IMHEIGHT - 1]
-    
+                              if 60  < x < IMWIDTH - 30 and 60  < y < IMHEIGHT - 30]
+
     if generated_diagonal_row:
-		
+       
+	# initialize the local threshold average
         coord = generated_diagonal_row[0]
         x, y = coord
         # get overarching integral threshold called local_avg
-        integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 10)
-	# integral_avg = avg_pixval
+        integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 110)  # was 60
+
         black_pixels = []
-        diag_length = len(generated_diagonal_row)  # this changes at the beginning and ending of the drawing
+        diag_length = len(generated_diagonal_row)
         temp_line = []
         trigger = 0
         # adjust the local average by the threshold map . . that means look up the local average derived
@@ -364,17 +414,18 @@ def get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
         # based on standard deviation calculations of the whole pixel population. It tempers the local thresh to
         # some degree
         threshold_adjustment = calc_local_thresh(threshold_map, integral_avg)
-	
+
         for index in range(diag_length - 1):  # for coord in generated_diagonal_row:
 
             coord = generated_diagonal_row[index]
             x, y = coord
             pixval = pix[x, y]
+	    
             # threshold_level = local_avg + threshold_adjustment
             thresh = pixval - integral_avg  # difference between local avg and pixval, this must be
             # negatively larger than the threshold_adjustment this is really opaque. We should subtract the adjust
             # value from the local integral average and then see if the pixval is less than
- 	    
+	   
             if trigger == 0:  # if we have no black pixel
                 threshold_adjustment = calc_local_thresh(threshold_map, integral_avg)
 
@@ -385,37 +436,101 @@ def get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
                 local_threshold = integral_avg + threshold_adjustment
                 coord_tuple = coord, local_threshold
                 temp_line.append(coord_tuple)
-	    # print pixval, integral_avg, thresh, threshold_adjustment, 'pixval, int_avg, thresh, threshold_ajdustment'
-            if pixval >= integral_avg - 5 and trigger == 1 or thresh >= 5 and trigger == 1:
+
+            if pixval >= integral_avg - 8 and trigger == 1 or thresh >= threshold_adjustment + 11 and trigger == 1:
                 trigger = 0         # was 10 above
                 black_pixels.append(temp_line)
                 temp_line = []
 
-            if index % 20 == 0 or y < 20 or y > IMHEIGHT - 10:
-		 # recalibrate the threshold once every 40 pixels. Effects threshold drastically
-                if coord[0] > IMWIDTH or coord[1] > IMHEIGHT:
-                    integral_avg = get_local_avg_from_integral(integral_image, coord, 1, 10)
+            if index % 40 == 0:  # recalibrate the threshold once every 40 pixels. Effects threshold drastically
+                if coord[0] > IMWIDTH - 85 or coord[1] > IMHEIGHT - 85:
+                    integral_avg = get_local_avg_from_integral(integral_image, coord, 1, 110)
                 else:
-                    integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 10)
-	        if integral_avg < (pixval_key/float(2.4)):  # gross error
-			integral_avg = pixval_key 	
+                    integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 110)
     else:
         black_pixels = []
-
+    
     return black_pixels
 
 
-def get_line_segments_in_path(generated_diagonal_row, pix, pixval_dev, pixval_key,
-                              x_n, y_n, imwidth, imheight, integral_image, threshold_map):
+def get_white_pixels_in_lined_diag_row(generated_diagonal_row, pix, x_nw, y_nw, IMWIDTH, IMHEIGHT, integral_image):
+
+    """Read a row of pixels from an image test each pixel value for blackness
+    if its black the start counting and if we have several sequential blacks
+    then we can say we found blacks"""
+
+    # generated_diagonal_rows is a list of coordinates that runs diagonally  across the page
+    # the diagonal row is check for boundary inclusion
+    
+    generated_diagonal_row = [(x, y) for x, y in generated_diagonal_row
+                              if 60  < x < IMWIDTH - 60 and 60  < y < IMHEIGHT - 60]
+
+    if generated_diagonal_row:
+
+        # initialize the local threshold average
+        coord = generated_diagonal_row[0]
+        x, y = coord
+        # get overarching integral threshold called local_avg
+        integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 110)  # was 60
+	
+        black_pixels = []
+        diag_length = len(generated_diagonal_row)
+        temp_line = []
+        trigger = 0
+        # adjust the local average by the threshold map . . that means look up the local average derived
+        # from the intergral image and adjust it based on the lookup in the threshold map. The threshold map is
+        # based on standard deviation calculations of the whole pixel population. It tempers the local thresh to
+        # some degree
+        
+	
+        for index in range(diag_length - 1):  # for coord in generated_diagonal_row:
+
+            coord = generated_diagonal_row[index]
+            x, y = coord
+            pixval = pix[x, y]
+	    
+            # threshold_level = local_avg + threshold_adjustment
+            thresh = pixval - integral_avg  # difference between local avg and pixval, this must be
+            # negatively larger than the threshold_adjustment this is really opaque. We should subtract the adjust
+            # value from the local integral average and then see if the pixval is less than
+
+            if thresh >= 25 and trigger == 0:  # start saving
+                trigger = 1
+
+            if trigger == 1:  # actually save the black coords
+                
+                coord_tuple = coord, integral_avg
+                temp_line.append(coord_tuple)
+
+            if thresh < -13 and trigger == 1:
+                trigger = 0         # was 10 above
+                black_pixels.append(temp_line)
+                temp_line = []
+
+            if index % 40 == 0 or x < 10:  # recalibrate the threshold once every 40 pixels. Effects threshold drastically
+                if coord[0] > IMWIDTH - 85 or coord[1] > IMHEIGHT - 85:
+
+                    integral_avg = get_local_avg_from_integral(integral_image, coord, 1, 110)
+                else:
+                    integral_avg = get_local_avg_from_integral(integral_image, coord, 0, 110)
+    else:
+        black_pixels = []
+    print len(black_pixels), 'inside at end'
+    return black_pixels
+
+
+def get_line_segments_in_path(generated_diagonal_row, pix, pixval_dev,
+                              nw_bound, se_bound, imwidth, imheight, integral_image, threshold_map):
 
     """
-    Look for sequential groups of black pixels that probably represent lines
+    Look for sequential groups of black pixels that probably represent lines. this is depreciated
+    because its redundant. It used to look for diagonal rows that had more than 2 segments but its very
+    possible to have a clean single segment in the row and still be legit.
 
     Args:
         generated_diagonal_row:
         pix:
         pixval_dev:
-        pixval_key:
         x_n:
         y_n:
         imwidth:
@@ -426,17 +541,10 @@ def get_line_segments_in_path(generated_diagonal_row, pix, pixval_dev, pixval_ke
     Returns:
 
     """
-
-    black_pixels = get_black_pixels(generated_diagonal_row, pix, pixval_dev, pixval_key,
-                                    x_n, y_n, imwidth, imheight, integral_image, threshold_map)
-    
-    if black_pixels:  # black pixels has x, y, local avg pixval
-        # 4 should adjust with line width??
-        black_lines = [black for black in black_pixels if len(black) >= 4]  # 4 is arbitrarily small
-    else:
-        black_lines = []
-
-    return black_lines
+   
+    black_lines_in_column = get_black_pixels_in_diag_row(generated_diagonal_row, pix, pixval_dev,
+                                    nw_bound, se_bound, imwidth, imheight, integral_image, threshold_map)
+    return black_lines_in_column
 
 
 def get_slope_from_angle(angle):
@@ -463,7 +571,7 @@ def get_slope_from_angle(angle):
     return slope
 
 
-def calculate_diagonal_width(upper_left, lower_right, angle, imheight):
+def calculate_diagonal_width(upper_left, lower_right, angle, imwidth, imheight):
 
     """When we create the diagaonal search paths to look for black pixels the
     path will likely have to start well off the image boundaries in order to
@@ -474,12 +582,12 @@ def calculate_diagonal_width(upper_left, lower_right, angle, imheight):
 
     # reverse the angle of the search path so we can look up and to the left/right
     # yes this will generate negative x's which would normally be out of range
-    # however the get_pixel_path_from_angle only adds valid coordinates to the
+    # however the get_pixel_path_from_angle only adds valid coordinats to the
     # path so any negatives are stripped before being passed to the search
     xstart, ystart = upper_left  # nw corner of drawing
     xend, yend = lower_right  # bounds of drawn image,  se corner of drawing
-    
-    reverse_angle = angle - 180   # Look in the opposite direction currently 102
+
+    reverse_angle = angle - 180   # Look in the opposite direction
     if reverse_angle < 0:
         reverse_angle += 360
 
@@ -491,27 +599,22 @@ def calculate_diagonal_width(upper_left, lower_right, angle, imheight):
         slope = get_slope_from_angle(reverse_angle)
         hypot = int(opposite/float(slope))  # hypotenuse
         new_coords = get_coords_from_angle(lower_right, hypot, reverse_angle)
-        end_range = new_coords[0]
-    
-    elif angle > 270:  # find the start coord beyond the end of the drawing
-	# compare the upper right to the lower left and get which ever 
-        # create the lower left point of contact in the drawing
-        lower_left = xstart, yend  # first x contact and last y contact
-	
-        opposite_length = abs(ystart - yend) # is the opposite in sohcahtao)
-        
-        slope = get_slope_from_angle(reverse_angle)
-        hypot = int(imheight/float(slope))  # hypotenuse
-	# get the coordinate at the end of the hypotenuse
-        new_coords = get_coords_from_angle(lower_left, hypot, reverse_angle)
-	start_range = new_coords[0]
-        
-	if start_range < 0:
-	    end_range = xend + (start_range * -1)  # add the total offset from the front to the end
-	else:
-	    end_range = xend + start_range + 10
+        end_range = new_coords[0] + imwdith
 
-    return start_range, end_range, hypot 
+    elif angle > 270:
+	# this needs to take into account the crop box we want only the crop y and x
+        # end_range = xend  # we have  x end need  x start
+        lower_left = xstart, yend  # first point of contact or crop box selection
+        opposite = abs(ystart - yend)  # is the opposite in sohcahtao)  # size of crop y's
+        slope = get_slope_from_angle(angle)
+	inverse = round(1/slope, 2)  # invert the slope to get sine
+        hypot = int(yend/float(slope))  # hypotenuse should be larger than height
+	# this should crop down the image to the crop box size if available
+        new_coords = get_coords_from_angle(lower_left, hypot, reverse_angle)
+        start_range = new_coords[0]  # x value of left most get coords
+	end_range = abs(abs(start_range) - xstart) + imwidth 
+	print start_range, end_range, upper_left, lower_right, 'upperleft', 'lowerright'
+    return start_range, end_range, hypot
 
 
 def read_local_arc_path(circumference_coords, center_point, pix, IMWIDTH, IMHEIGHT):
@@ -519,17 +622,19 @@ def read_local_arc_path(circumference_coords, center_point, pix, IMWIDTH, IMHEIG
     """Take in a list of coordinates, read each coordinates value"""
     # we already have all blacks labeled would lookup be faster than read image again??
     pixels = []
-
+    
     for index, coord_tup in enumerate(circumference_coords):
         x, y = coord_tup
-        polar_angle = get_polar_angle(coord_tup, center_point, 1)
+        
+        # polar_angle = get_polar_angle(center_point, coord_tup, 1)
+	polar_angle = index * 2
         try:
-            pixval = pix[x, y]
+            pixval = pix[x][y]
         except:
             pixval = 140
         collect = x, y, pixval, polar_angle
         pixels.append(collect)
-
+    
     return pixels
 
 
@@ -540,25 +645,25 @@ def are_coords_black(coords, black_coords, radius=28):
     sample_set = set(coords)
     intersection_coords = list(sample_set.intersection(black_coords))
     if intersection_coords:
-        # print len(coords), len(intersection_coords)
-	pass
+        print len(coords), len(intersection_coords)
 
 
-def shift_generic_path_to_local_coords(center_coords, circle_path, im_width, im_height):
+def shift_generic_path_to_local_coords(center_coords, generic_circle_path, im_width, im_height):
 
-    """We can assume a pair of integers and just assume the degree value"""
+    """Take a generic circle path and change its coordinate path to a local pixel center
+    We can assume a pair of coordinate integers and just assume the degree value"""
 
     local_circumference = []
     xy_coords, angle = center_coords
-
+    
     x, y = xy_coords
-    for adjustment in circle_path:
+    for adjustment in generic_circle_path:
         xadj, yadj = adjustment
         local_x = x + xadj
         local_y = y + yadj
         coord_point = local_x, local_y
         local_circumference.append(coord_point)
-
+   
     return local_circumference
 
 

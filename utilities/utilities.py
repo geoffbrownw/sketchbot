@@ -85,7 +85,7 @@ def populate_array_with_coords(coo_flat_dict, IMWIDTH, IMHEIGHT):
             flat_coords = row, column
             if flat_coords in coo_flat_dict:
                 flats = flatten_coords(flat_coords, IMWIDTH)
-                temp_array_list.append(255)  # was flats
+                temp_array_list.append(flats)  # was flats switch to 255
             else:
                 temp_array_list.append(0)   #otherwise enter zero
 

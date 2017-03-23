@@ -14,6 +14,57 @@ import math
 from attribs.attribs import *
 from stats import *
 
+def calibrate_black_threshold(pix, width, height):
+
+    """reads a single horizontal row, a single vertical column and a digaonal
+    path across an image and searches for line crossings or black pixels that
+    appear in each path. Measure the width of each of those lines and return
+    the width that is in the center of the list"""
+
+    save_pixel_values = []
+    origin = 0, 0
+
+    # get the distance and direction of each path
+    diag_dist = int(math.sqrt(width**2 + height**2) * .90)
+    vertical_start = int(width/float(2)), 0  # x=width/2, y=0
+    horizontal_start = 0, int(height/float(2))  # x=0, y=width/2
+    diagonal_angle = get_polar_angle(origin, (width, height), 1)
+    
+    # create the list of pixels in each row/column/path
+    vertical_path = get_pixel_path_from_angle(vertical_start, height, 270, height)
+    horizontal_path = get_pixel_path_from_angle(horizontal_start, width, 0, height)
+    diag_path = get_pixel_path_from_angle(origin, diag_dist, diagonal_angle, height)
+    combined_paths = vertical_path + horizontal_path + diag_path
+
+    for coords in combined_paths:  # this is a down, across and diaganonl line
+        x, y = coords
+        pixval = pix[x, y]
+        save_pixel_values.append(pixval)
+    
+    avg_pixel = sum(save_pixel_values)/float(len(save_pixel_values))
+
+    std_pixel_dev = calc_variance(save_pixel_values, 1)
+    med_pix_index = int(len(save_pixel_values)/float(2))
+    median_black = save_pixel_values[med_pix_index]
+
+    gaps = [(x - save_pixel_values[i - 1]) for i, x in enumerate(save_pixel_values)][1:]
+
+    negs = [gap for gap in gaps if gap < -25]  # need to change this to -6 for non-thumbnail images
+    raw_neg_gaps = [gap for gap in gaps if gap < -10]
+    # print len(negs), len(std_neg_gaps), 'hhhhhhh'
+    # negs = sorted(negs)
+    # negs = list(set(negs))
+    # negs = negs[1:-2]  # elimnated the top and bottom
+    std_neg_gaps = list(set(raw_neg_gaps))
+    zoot_ind = int(len(std_neg_gaps)/float(2))  # middle index value
+    median_neg = std_neg_gaps[zoot_ind]  # median negative jump
+
+    std_neg_dev = get_median_absolute_deviation(std_neg_gaps) # std dev calc either way of median
+
+    # median_neg is median jump, and dev
+    return median_neg, std_neg_dev, avg_pixel, std_pixel_dev
+
+
 
 def calc_local_thresh(thresh_map, local_avg):
 
@@ -103,7 +154,7 @@ def create_threshold_map(jumps, pixel_range, MEDIAN_PIXEL, std_jump_dev):
             light_thresh_per = int(100 * (jumps[2]/float(highest_in_range))) - 7  # was 0
         elif 3 <= std_jump_dev <= 8:
             dark_thresh_per = int(100 * (jumps[0]/float(lowest_in_range))) - 3
-            medium_thresh_per = int(100 * (jumps[1]/float(middle_in_range))) - 1
+            medium_thresh_per = int(100 * (jumps[1]/float(middle_in_range))) - 3
             light_thresh_per = int(100 * (jumps[2]/float(highest_in_range))) - 3
         else:  # less contrasty, flangehalf.jpg, lobe.jpg
             dark_thresh_per = int(100 * (jumps[0]/float(lowest_in_range))) - 10   # was 8
@@ -114,6 +165,7 @@ def create_threshold_map(jumps, pixel_range, MEDIAN_PIXEL, std_jump_dev):
     threshold_map.append([lowest_in_range, dark_thresh_per])
     threshold_map.append([middle_in_range, medium_thresh_per])
     threshold_map.append([highest_in_range, light_thresh_per])
+
     return threshold_map
 
 
@@ -141,7 +193,7 @@ def calculate_threshold_range(median_neg, std_dev, avg_pixval, std_pix_dev):
     return slice_range, slice_range_pixval
 
 
-def calibrate_black_threshold(pix, width, height):
+def calibrate_black_threshold_thumb(pix, width, height):
 
     """reads a single horizontal row, a single vertical column and a digaonal
     path across an image and searches for line crossings or black pixels that
@@ -155,7 +207,7 @@ def calibrate_black_threshold(pix, width, height):
     diag_dist = int(math.sqrt(width**2 + height**2) * .90)
     vertical_start = int(width/float(2)), 0  # x=width/2, y=0
     horizontal_start = 0, int(height/float(2))  # x=0, y=width/2
-    diagonal_angle = get_polar_angle((width, height), origin, 1)
+    diagonal_angle = get_polar_angle(origin, (width, height), 1)
 
     # create the list of pixels in each row/column/path
     vertical_path = get_pixel_path_from_angle(vertical_start, height, 270, height)
@@ -213,7 +265,7 @@ def local_threshold(local_average, pixval_deviation, pixval_key):
     return local_thresh
 
 
-def get_local_avg_from_integral(integral_image, coords, trunk, IMWIDTH, IMHEIGHT, box_size= 140): # float()
+def get_local_avg_from_integral(integral_image, coords, trunk, box_size=140): # float()
 
     y, x = coords  # this only works if backwards for some reason !!!!!!!!!!!!!!
 
